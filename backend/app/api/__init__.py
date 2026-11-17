@@ -1,0 +1,9 @@
+from .subjects import router as subjects_router
+from .students import router as students_router
+from .classrooms import router as classrooms_router
+from .arrangements import router as arrangements_router
+from .algorithms import router as algorithms_router
+from .conflict_analysis import router as conflict_router
+from .reports import router as reports_router
+from .dashboard import router as dashboard_router
+from .seed import router as seed_router

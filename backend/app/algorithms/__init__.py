@@ -1,0 +1,5 @@
+from .sorting import merge_sort_students, quick_sort_students, interleave_sort_students
+from .greedy import greedy_seat_allocation
+from .backtracking import backtracking_seat_allocation
+from .conflict_engine import detect_seating_conflicts, compute_adjacency_matrix
+from .comparator import run_algorithm_comparison

@@ -29,6 +29,30 @@ def db_session():
         db.close()
 
 
+def create_test_hall(db_session, name, seat_count):
+    classroom = db_session.query(Classroom).filter_by(classroom_name=name).first()
+    if classroom is None:
+        classroom = Classroom(
+            classroom_name=name,
+            capacity=seat_count,
+            rows=1,
+            cols=seat_count,
+        )
+        db_session.add(classroom)
+        db_session.flush()
+        db_session.add_all([
+            Seat(
+                classroom_id=classroom.classroom_id,
+                seat_number=f"R1C{col}",
+                row_num=1,
+                col_num=col,
+            )
+            for col in range(1, seat_count + 1)
+        ])
+        db_session.commit()
+    return classroom
+
+
 def test_admin_login_protects_api_routes():
     client = TestClient(app)
     allowed_origin = client.options(
@@ -121,40 +145,69 @@ def test_get_subjects_and_students(db_session):
 
 
 def test_generate_arrangement_greedy(db_session):
+    classroom = create_test_hall(db_session, "Greedy Conflict-Free Test Hall", 120)
     payload = ArrangementCreate(
         exam_name="Mid-Term ADA Exam 2026",
         algorithm="greedy",
-        separation_mode="all",
-        subject_ids=[next(subject.subject_id for subject in get_subjects(search="ADA", db=db_session))]
+        separation_mode="horizontal",
+        subject_ids=[next(subject.subject_id for subject in get_subjects(search="ADA", db=db_session))],
+        classroom_ids=[classroom.classroom_id],
     )
     res = generate_seating_arrangement(payload=payload, db=db_session)
     assert res.students_assigned == 60
     assert "Greedy" in res.algorithm_used
     assert len(res.assignments) == 60
-    assert res.total_conflict_count >= 0
+    assert res.total_conflict_count == 0
     assert {assignment.subject_name for assignment in res.assignments} == {"ADA"}
 
 
-def test_shared_students_cannot_be_seated_twice_in_multi_subject_exam(db_session):
+def test_shared_students_get_one_seat_per_selected_subject_enrollment(db_session):
     subjects = get_subjects(search=None, db=db_session)
+    classroom = create_test_hall(db_session, "Multi-subject Enrollment Test Hall", 120)
+
     payload = ArrangementCreate(
         exam_name="Multi-subject Shared Roster Test",
         algorithm="greedy",
-        separation_mode="all",
+        separation_mode="horizontal",
         subject_ids=[subjects[0].subject_id, subjects[1].subject_id],
+        classroom_ids=[classroom.classroom_id],
+    )
+    res = generate_seating_arrangement(payload=payload, db=db_session)
+    assert res.total_students == 120
+    assert res.students_assigned == 120
+    assert len(res.assignments) == 120
+    assert len({(assignment.student_roll_no, assignment.subject_id) for assignment in res.assignments}) == 120
+    assert res.total_conflict_count == 0
+
+
+def test_arrangement_is_not_saved_when_zero_conflicts_are_impossible(db_session):
+    subject = get_subjects(search="ADA", db=db_session)[0]
+    classroom = create_test_hall(db_session, "Conflict-Infeasible Test Hall", 60)
+    previous_count = len(get_arrangements(db=db_session))
+    payload = ArrangementCreate(
+        exam_name="Conflict-Infeasible Test Exam",
+        algorithm="greedy",
+        separation_mode="horizontal",
+        subject_ids=[subject.subject_id],
+        classroom_ids=[classroom.classroom_id],
     )
 
     with pytest.raises(HTTPException) as error:
         generate_seating_arrangement(payload=payload, db=db_session)
-    assert error.value.status_code == 400
-    assert "Generate one subject exam at a time" in error.value.detail
+
+    assert error.value.status_code == 422
+    assert "zero-conflict" in error.value.detail
+    assert len(get_arrangements(db=db_session)) == previous_count
 
 
 def test_generate_arrangement_backtracking(db_session):
+    classroom = create_test_hall(db_session, "Backtracking Conflict-Free Test Hall", 120)
     payload = ArrangementCreate(
         exam_name="Backtracking Test Exam",
         algorithm="backtracking",
         separation_mode="horizontal",
+        subject_ids=[next(subject.subject_id for subject in get_subjects(search="ADA", db=db_session))],
+        classroom_ids=[classroom.classroom_id],
         max_states=5000,
         max_backtracks=2000
     )

@@ -3,7 +3,9 @@
  * Interfaces with FastAPI backend at /api
  */
 
-const API_BASE = '/api';
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL || '/api'
+).replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'admin_access_token';
 
 function handleUnauthorized(url) {

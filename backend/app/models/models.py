@@ -122,7 +122,7 @@ class SeatingAssignment(Base):
     conflict_details = Column(Text, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("arrangement_id", "student_roll_no", name="uq_arrangement_student"),
+        UniqueConstraint("arrangement_id", "student_roll_no", "subject_id", name="uq_arrangement_student_subject"),
         UniqueConstraint("arrangement_id", "seat_id", name="uq_arrangement_seat"),
     )
 

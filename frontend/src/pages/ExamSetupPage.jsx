@@ -45,7 +45,7 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
         setClassrooms(rms);
         setStudents(stus);
 
-        // Each exam arrangement represents one subject at a time.
+        // Preserve the existing preference of selecting the first subject initially.
         setSelectedSubjectIds(subjs.length > 0 ? [subjs[0].subject_id] : []);
         setSelectedClassroomIds(rms.map((r) => r.classroom_id));
         setError(null);
@@ -58,20 +58,25 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
     loadData();
   }, []);
 
-  // Compute eligible student count
-  const eligibleStudents = students.filter(
-    (student) => student.subjects?.some((subject) => selectedSubjectIds.includes(subject.subject_id))
+  // Compute the selected-subject enrollment count subject-wise.
+  // A student can be listed under multiple subjects, while different subject rosters add to the total.
+  const selectedEnrollments = selectedSubjectIds.flatMap((subjectId) =>
+    students.filter((student) =>
+      student.subjects?.some((subject) => subject.subject_id === subjectId)
+    )
   );
 
   // Compute total available seats in selected classrooms
   const totalSelectedSeats = classrooms
     .filter((c) => selectedClassroomIds.includes(c.classroom_id))
-    .reduce((acc, c) => acc + (c.seats_count || c.capacity), 0);
+    .reduce((acc, c) => acc + (c.seats_count ?? c.capacity), 0);
 
-  const hasCapacityDeficit = eligibleStudents.length > totalSelectedSeats;
+  const hasCapacityDeficit = selectedEnrollments.length > totalSelectedSeats;
 
   const handleToggleSubject = (id) => {
-    setSelectedSubjectIds((prev) => (prev.includes(id) ? [] : [id]));
+    setSelectedSubjectIds((prev) =>
+      prev.includes(id) ? prev.filter((subjectId) => subjectId !== id) : [...prev, id]
+    );
   };
 
   const handleToggleClassroom = (id) => {
@@ -82,8 +87,8 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (selectedSubjectIds.length !== 1) {
-      alert('Please select one examination subject per arrangement.');
+    if (selectedSubjectIds.length === 0) {
+      alert('Please select at least one examination subject.');
       return;
     }
     if (selectedClassroomIds.length === 0) {
@@ -91,7 +96,7 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
       return;
     }
     if (hasCapacityDeficit) {
-      alert(`Cannot proceed: ${eligibleStudents.length} students selected, but only ${totalSelectedSeats} seats available.`);
+      alert(`Cannot proceed: ${selectedEnrollments.length} subject enrollments selected, but only ${totalSelectedSeats} seats available.`);
       return;
     }
 
@@ -132,7 +137,7 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
       <div>
         <h2 className="text-xl font-bold text-slate-900 tracking-tight">Examination Configuration Setup</h2>
         <p className="text-xs text-slate-500 mt-0.5">
-          Select one examination subject, allocate examination halls, define adjacency separation constraints, and select the ADA algorithm
+          Select one or more examination subjects, allocate examination halls, define adjacency separation constraints, and select the ADA algorithm
         </p>
       </div>
 
@@ -165,16 +170,16 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
               {hasCapacityDeficit ? 'Seating Capacity Insufficient' : 'Seating Capacity Validated'}
             </span>
             <span className="text-xs">
-              Selected Students: <strong>{eligibleStudents.length}</strong> | Total Available Seats:{' '}
+              Selected Subject Enrollments: <strong>{selectedEnrollments.length}</strong> | Total Available Seats:{' '}
               <strong>{totalSelectedSeats}</strong>{' '}
               {hasCapacityDeficit
-                ? `(Deficit of ${eligibleStudents.length - totalSelectedSeats} seats)`
-                : `(${totalSelectedSeats - eligibleStudents.length} buffer seats)`}
+                ? `(Deficit of ${selectedEnrollments.length - totalSelectedSeats} seats)`
+                : `(${totalSelectedSeats - selectedEnrollments.length} buffer seats)`}
             </span>
           </div>
         </div>
         <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded bg-white/70 border border-current">
-          Capacity Ratio: {totalSelectedSeats > 0 ? Math.round((eligibleStudents.length / totalSelectedSeats) * 100) : 0}%
+          Capacity Ratio: {totalSelectedSeats > 0 ? Math.round((selectedEnrollments.length / totalSelectedSeats) * 100) : 0}%
         </span>
       </div>
 
@@ -224,7 +229,19 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
                   <Layers className="w-4 h-4 text-teal-600" />
                   <span>2. Examination Subject</span>
                 </h3>
-                  <span className="text-[11px] text-slate-500">One subject per exam</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedSubjectIds(
+                        selectedSubjectIds.length === subjects.length
+                          ? []
+                          : subjects.map((subject) => subject.subject_id)
+                      )
+                    }
+                    className="text-xs text-blue-600 font-semibold hover:underline"
+                  >
+                    {selectedSubjectIds.length === subjects.length ? 'Clear all' : 'Select all'}
+                  </button>
               </div>
 
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -239,8 +256,7 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
                     >
                       <div className="flex items-center gap-2.5">
                         <input
-                          type="radio"
-                          name="exam-subject"
+                          type="checkbox"
                           checked={isChecked}
                           onChange={() => handleToggleSubject(sub.subject_id)}
                           className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
@@ -257,7 +273,7 @@ export default function ExamSetupPage({ setActivePage, setLatestArrangementResul
             </div>
 
             <div className="mt-3 pt-2 border-t border-slate-100 text-xs text-slate-500 font-medium">
-              {eligibleStudents.length} students enrolled in the selected subject
+              {selectedEnrollments.length} selected subject enrollments (counted separately by subject)
             </div>
           </div>
 

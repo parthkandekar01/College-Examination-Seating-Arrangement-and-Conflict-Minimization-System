@@ -38,14 +38,6 @@ def generate_seating_arrangement(payload: ArrangementCreate, db: Session = Depen
         if payload.student_roll_nos:
             student_query = student_query.filter(Student.roll_no.in_(payload.student_roll_nos))
         enrolled_students = student_query.order_by(Student.roll_no.asc(), Subject.subject_code.asc()).all()
-
-        if len(payload.subject_ids) > 1:
-            enrolled_rolls = [student.roll_no for student, _ in enrolled_students]
-            if len(enrolled_rolls) != len(set(enrolled_rolls)):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Students enrolled in multiple selected subjects would be seated more than once. Generate one subject exam at a time.",
-                )
         students_input = [
             {
                 "roll_no": student.roll_no,
@@ -157,6 +149,60 @@ def generate_seating_arrangement(payload: ArrangementCreate, db: Session = Depen
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported algorithm '{payload.algorithm}'")
 
     assignments_data = algo_result.get("assignments", [])
+    expected_enrollments = {
+        (student["roll_no"], student.get("subject_id"))
+        for student in students_input
+    }
+
+    def contains_all_enrollments(assignments):
+        assigned_enrollments = [
+            (assignment.get("student_roll_no"), assignment.get("subject_id"))
+            for assignment in assignments
+        ]
+        return (
+            len(assigned_enrollments) == len(students_input)
+            and len(set(assigned_enrollments)) == len(assigned_enrollments)
+            and set(assigned_enrollments) == expected_enrollments
+        )
+
+    if (
+        not contains_all_enrollments(assignments_data)
+        or algo_result.get("total_conflicts", 0) > 0
+    ) and algo_choice != "backtracking":
+        fallback_result = backtracking_seat_allocation(
+            students=students_input,
+            seats=seats_input,
+            separation_mode=payload.separation_mode,
+            max_states=payload.max_states or 30000,
+            max_backtracks=payload.max_backtracks or 10000,
+            time_limit_sec=payload.time_limit_sec or 3.5
+        )
+        if (
+            contains_all_enrollments(fallback_result.get("assignments", []))
+            and fallback_result.get("total_conflicts", 0) == 0
+        ):
+            algo_result = fallback_result
+            algo_label = "Backtracking (Conflict-Free Optimization)"
+            assignments_data = algo_result["assignments"]
+
+    if not contains_all_enrollments(assignments_data):
+        assigned_count = len(assignments_data)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Could not seat all {len(students_input)} selected subject enrollments. "
+                f"Only {assigned_count} could be assigned. Add classroom seats or adjust the selection."
+            )
+        )
+    if algo_result.get("total_conflicts", 0) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "A zero-conflict seating arrangement could not be found for the selected "
+                "subjects, classrooms, and separation rule. No arrangement was saved."
+            )
+        )
+
     conflicting_seat_ids = set(algo_result.get("conflicting_seat_ids", []))
 
     # 5. Persist Arrangement Result
